@@ -30,6 +30,10 @@ Creating the transfer function of this got cumbersome really quickly.
 
 I found a couple blog posts and youtube channels who approached this problem a different way - Lagrangian mechanics. This simplified the modeling of the dynamics significantly. Using the equation L = T - V, the following is the dervation of the state equation of the robot. 
 
+Lagrangian mechanics is a pretty cool concept. The way I understand it is Lagrangian is another way to model the dynamics of a system similar to using Newton's Laws like what we learned in physics class. In its simplest sense, it's models the transfer of energy from kinetic (T) to gravitational (V). Using the Euler-Lagrange equations, we derive the nonlinear equations of motion directly from the energy functions. Later, we use the Jacobian to linearize these equations around equilibrium points for control design. 
+
+You can think of it like water flowing down a hill. Using Newtonian you have to model every type of force acting on the water as it goes down. With Lagrangian you know at the top it's all gravitational energy and at the bottom it's kinetic and that's all you need!
+
 [insert derivation here]
 
 
