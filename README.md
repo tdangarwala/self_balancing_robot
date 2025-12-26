@@ -1,11 +1,14 @@
 # Self Balancing Robot (WIP)
-The goal of this project is to build something like this: https://www.shaysackett.com/inverted-pendulum-robot/ - a 2 wheeled imverted pendulum. It was mostly inspired out the desire to learn more about controls design. Maybe eventually this could be combined with my "robot follower" project that I started and inevitably never finished which was to build a robot that could follow me around. 
+The goal of this project is to build something like this: https://www.shaysackett.com/inverted-pendulum-robot/ - a 2 wheeled imverted pendulum. I want it to be able to handle poke forces, objects balancing on top, and balancing itself. It was mostly inspired out the desire to learn more about controls design. Maybe eventually this could be combined with my "robot follower" project that I started and inevitably never finished which was to build a robot that could follow me around.
+
+I currently work at Speedgoat which is a company that builds the physical side of Mathworks - simulation hardware to go along with the models you create in Simulink. Model Based Design. I have some experience with this from my time at GM but it would be interesting to try and apply that here. So I will try to model the system and get the specs for the design (mass, max poke force it can handle, etc). And then actually design it - though I got excited and already bought components (based on the blog link I copied). 
 
 Steps I will take:
 1. Understand Dynamics of System
 2. Design and Simulate Controller (design body in parallel)
-3. Assemble Robot
-4. Testing and Refinement
+3. Create Model of System and Controls
+4. Assemble Robot
+5. Testing and Refinement
 
 Component Selection:
 For this part I mostly just copied what was used by Shay Sackett in the blog post linked. Here I'll provide justification for why each piece was picked. 
