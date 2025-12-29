@@ -1,4 +1,4 @@
-h# Self Balancing Robot (WIP)
+# Self Balancing Robot (WIP)
 The goal of this project is to build something like this: https://www.shaysackett.com/inverted-pendulum-robot/ - a 2 wheeled imverted pendulum. I want it to be able to handle poke forces, objects balancing on top, and balancing itself. It was mostly inspired out the desire to learn more about controls design. Maybe eventually this could be combined with my "robot follower" project that I started and inevitably never finished which was to build a robot that could follow me around.
 
 I currently work at Speedgoat which is a company that builds the physical side of Mathworks - simulation hardware to go along with the models you create in Simulink. Model Based Design. I have some experience with this from my time at GM but it would be interesting to try and apply that here. So I will try to model the system and get the specs for the design (mass, max poke force it can handle, length, etc). And then actually design it - though I got excited and already bought components (based on the blog link I copied). 
@@ -11,7 +11,7 @@ Steps I will take:
 5. Testing and Refinement
 
 Requirements:
-- 
+See Requirements.docx
 
 
 Component Selection:
@@ -50,7 +50,7 @@ Lagrangian mechanics is a pretty cool concept. The way I understand it is Lagran
 
 You can think of it like water flowing down a hill. Using Newtonian you have to model every type of force acting on the water as it goes down. With Lagrangian you know at the top it's all gravitational energy and at the bottom it's kinetic and that's all you need!
 
-To make this mostly about design and findings, please see the attached doc walking through the derivation. 
+To make this mostly about design and findings, please see the attached doc [... Derivation.docx] walking through the derivation. 
 
 # Controller Design
 
