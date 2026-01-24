@@ -53,5 +53,28 @@ You can think of it like water flowing down a hill. Using Newtonian you have to 
 To make this mostly about design and findings, please see the attached doc [... Derivation.docx] walking through the derivation. 
 
 # Controller Design
+The main considerations behind the controller choice is based on the nature of the problem we are looking to solve. The self balancing robot which is effectively an inverted pendulum is inherently unstable and multivariable. I was between PID and LQR (which I very recently learned about). PID works with only one input and one output and can be forced to be multi input multi output by stacking the loops. This would require balancing the impact of different gains across the system to ensure balancing, which becomes an extremely tedious task. LQR solves this by being a model based approach that updates multiple states at once. All of these states within the system are tied together, LQR represents this, PID does not. 
 
+LQR is pretty cool. At it's fundamental it's a verion of dynamic programming which is taking the current state and finding the least cost option to get to the next state. The least cost option is defined as the best move to make to get to the goal state (balanced in this case). In the case of LQR the cost function is defined as a quadratic. 
 
+I'll be using MATLAB or python to find the K matrix in u = -Kx. But I need to define the Q and R matrices. The Q matrix is the are the weights which define how important the different states are to the overall problem. The R matrix is weighting matrix that penalizes the control input. A simple way to understand this is Q describes what mistakes matter and how much and R describes how much control effort youre willing to use to prevent the mistakes. 
+
+Next I need to figure out how to determine Q and R empirically. 
+
+There's something called Bryson's rules which says that Qjj = 1/(max acceptable error)^2 and Rii = 1/(max acceptable input)^2. 
+
+Max acceptable error per state:
+x : 0.1 m (worst case is that the robot may be placed on a table and I dont want it falling off)
+x dot : 0.1 m/s 
+theta : 0.175 radians (10 degrees)
+theta dot : 2 rad/s (made up)
+
+This makes the diagonal of the Q matrix [100, 100, 32.65,0.25]. 
+
+Next I need to simulate this to understand the performance and limitations of this robot. I'd also like to use this to find the ideal parameteres of the robot. Ideally I could use MATLAB but I dont have that so python will have to do. Python has the Control Systems Library which is perfect for this.
+
+I want this simulation to allow the user to:
+- input all relevant parameters for the robot (mass, length, wheel radius, etc)
+- IMU modeling
+- simulate the self balancing, poke force input (configurable), and object balancing on top (configurable) for 1 minute each
+- summary metrics
