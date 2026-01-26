@@ -41,7 +41,7 @@ class Simulation:
             [0],
             [Ieff / detM],
             [0],
-            [-self.RobotParams.mb * self.RobotParams.l / detM] # Pushing wheels forward tilts body back
+            [-self.RobotParams.mb * self.RobotParams.l / detM]
         ])
 
     def _is_controllable_observable(self):
