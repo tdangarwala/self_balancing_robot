@@ -16,13 +16,15 @@ if __name__ == "__main__":
     #Q = np.diag([1/xmax**2, 1/xdot_max**2, 1/theta_max**2, 1/thetadot_max**2])
     #R = np.array([[1/input_max**2]])
 
-    Q = np.diag([10, 1, 100, 1])
-    R = np.array([[0.01]])
+    Q = np.diag([1, 1, 10, 1])
+    R = np.array([[1.0]])
 
     #motor time constant = J/B
 
-    sim = Simulation(RobotParams(), Q, R, tau=0.02)
+    sim = Simulation(RobotParams(), Q, R, tau=0.05)
 
-    sim.run_regular_balancing(runtime=10, dt=0.001)
-    sim.run_poke_force_simulation(runtime=10, dt=0.001)
-    sim.run_object_balancing_simulation(runtime=10, dt=0.001)
+    sim.run_nonlinear_balancing(runtime=10, dt=0.001)
+
+    # sim.run_regular_balancing(runtime=10, dt=0.001)
+    # sim.run_poke_force_simulation(runtime=10, dt=0.001)
+    # sim.run_object_balancing_simulation(runtime=10, dt=0.001)

@@ -76,5 +76,33 @@ Next I need to simulate this to understand the performance and limitations of th
 I want this simulation to allow the user to:
 - input all relevant parameters for the robot (mass, length, wheel radius, etc)
 - IMU modeling
-- simulate the self balancing, poke force input (configurable), and object balancing on top (configurable) for 1 minute each
+- simulate the self balancing, poke force input (configurable), and object balancing on top (configurable) 
 - summary metrics
+
+Creating the simulation was a pretty cool learning experience. 
+
+- I learned the physical interpretation of the different matricies. The A matrix effectively shows the "physics" of the system and how each state is impacted by it without considering any external factors. It describes that positon and velocity are related, as are angle an angular velocity. It also shows the gravity causes the angular velocity to go positive (robot tips forwards) and linear velocity moves in the opposite direction to counter that (you'll see this theme throughout this paragraph). In the B matrix it shows which way the robot will move when the input force from the motor is applied to it.  The same is expected of the E matrix I created to model the "finger poke" external disturbance. This is actually where I found an error in my math. When initially testing the code, I would see behavior where the states would stay at 0 until the end of the test where it would "explode" to some very large number. In my B matrix both the terms for the linear and angular acceleration had the same sign which means that pushing the wheels forward (linear) also tilts the body forward (angular) which is not correct. There were also some errors with the actual values due to math. The E matrix should be the same as the B since the disturbance should have the same impact as the motor inputs on the system. 
+
+- I learned you can do 1/(max value)^2 to estimate values for the Q and R matrices. 
+
+- I learned how to make the model more realistic. There were two ways this happened. One was the IMU noise. The sensor noise was used to make the states more realistic. This was done by taking into account the low pass filtering done by the MPU6050 and modeling the noise of the IMU with a gaussian distribution. The states being impacted by this noise are theta and theta dot only. The reason a guassian distribution makes sense is because the noise is the sum of many smaller noises (for lack of a better term). When you add those together you get a guassian distribution (central limit theorem). The theta is made noisy with the gaussian noise and a recursive low pass filter is used to smooth out the jitter, which is basically just a low pass filter that remembers the past. The full state is updated with this new theta value. The other was motor lag. This was accounted for by taking the difference of the commanded input (u_cmd) and the actual and factoring an estimated time constant of the motor. The actual motor command is a value that is iteratively created (starting from 0) and compounded on from there. This makes sense because in the physical world, nothing happens instantly - so effectively the motor is receiving an "older" command. 
+
+- I also learned some of the basics that go into creating a simulation. You have the initialization step, a calculation step, and then a time step. Though my model is quite simple the core concepts of creating a simulation are there. One new aspect for me was the time step. There are a lot of different ways to do the time step. I used the integral which is the easiest one and it works well for smaller dts. There's also RK4, Backward Euler, and Adaptive Integrators - these are all suited for different dt and simulation needs. 
+
+- I think I now understand what a determinant is. 
+
+The next thing that's important to model is the nonlinear dynamics of the system. The mathematical derivation of that can be found in the Self Balancing Robot Derviations document. 
+
+I want to make sure that the responses shown by these models are realistic. My way of gauging that is to see if the rise time of the xdot state in the nonlinear dynamics simulation is realistic based on the hardware I'm using. The rise time I'm getting right now is 0.06s which is way too fast. This means that the motor almost instantaneously outputs the maximum torque to try to stabilize the robot. Even if the motors could do this it will most likely lead to wheel slip and other adverse effects and negatively impact the robot's performance.  
+
+I think I've gotten this to a good point where the controls can be confirmed that it is possible to control this thing. I now need to set up how the software is going to look. 
+
+# Software Design
+
+This section is how I want the software of the system to be written. This is keeping in mind that I will be interfacing with 2 DC motors and an IMU 6050 via an arduino and in the future will need to add in the vision system so the robot can follow me. 
+
+
+
+
+
+

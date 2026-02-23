@@ -1,5 +1,6 @@
 import control as ct
 import numpy as np
+import matplotlib.pyplot as plt
 
 from Analysis import Analysis
 
@@ -92,6 +93,10 @@ class Simulation:
         x = x0.copy()
         u_actual = np.array([[0.0]])
 
+        time = []
+        ucmd = []
+        uactual = []
+
         for t in np.arange(0, runtime, dt):
             d = disturbance_fn(t) if disturbance_fn else np.zeros((self.E.shape[1],1))
             x_sensed = self._add_sensor_noise(x)
@@ -101,16 +106,99 @@ class Simulation:
 
             u_actual += (u_cmd - u_actual) * dt/self.tau
 
+            ucmd.append(u_cmd[0,0])
+            uactual.append(u_actual[0,0])
+            time.append(t)
+
             x_dot = self.A @ x + self.B @ u_actual + self.E @ d
             analysis.add([x[0,0], x[1,0], x[2,0], x[3,0], t])
 
             x += x_dot * dt
 
+        plt.plot(time, np.array(ucmd), label='Commanded Input')
+        plt.plot(time, np.array(uactual), label='Actual Input', linestyle='--')
+        plt.title('Commanded vs Actual Input Torque')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Input Torque (Nm)')
+        plt.legend()
+
         return analysis
+
+    def _run_nonlinear_simulation(self, runtime, dt, x0):
+        analysis = Analysis()
+        x = x0.copy()
+        u_actual = np.array([[0.0]])
+
+        stall_torque = 1.76
+        no_load_speed = 26.3
+
+        p = self.RobotParams
+        Meff = p.mb + p.mw + p.iw/p.rw**2
+        Ieff = p.mb*p.l**2 + p.ib
+
+        for t in np.arange(0,runtime, dt):
+            x_sensed = self._add_sensor_noise(x) #where am i via sensors
+
+            v = x[1,0]
+            w_wheel = v / p.rw
+
+            max_phys_torque = stall_torque * (1 - abs(w_wheel) / no_load_speed)
+            max_phys_torque = max(0, max_phys_torque)
+
+            u_cmd = -self.K @ x_sensed #how do i react 
+            u_cmd = np.clip(u_cmd, -self.u_max, self.u_max) #adjust reaction based on motor capabilities
+            u_final = np.clip(u_cmd, -max_phys_torque, max_phys_torque)
+
+            u_actual += (u_final - u_actual) * dt/self.tau #adjust reaction based on motor lag
+
+            #using modeled state to calculate nonlinear dynamics 
+            theta = x[2,0]
+            theta_dot = x[3,0]
+            f_motor = u_actual[0,0]
+
+            # Nonlinear Mass Matrix M(q)
+            M = np.array([
+                [Meff, -p.mb * p.l * np.cos(theta)],
+                [-p.mb * p.l * np.cos(theta), Ieff]
+            ]) #negative for diagonals because moving positive in x direction tilts body back and vice versa
+
+            G = np.array([
+                [0],
+                [-p.mb * p.g * p.l * np.sin(theta)]])
+            
+            C = np.array([
+                [-p.mb*p.l*(theta_dot**2)*np.sin(theta)],
+                [0]])
+            
+            B = np.array([
+                [-f_motor],
+                [0]
+            ])
+
+            # Bu + G - C -> +G because matrix has negative sign.
+            rhs = B + G - C
+
+            # Solve for accelerations [x_ddot, theta_ddot]
+            # This replaces "x_dot = A@x + B@u"
+            accels = np.linalg.solve(M, rhs)
+        
+            # 3. Integrate
+            x_dot = np.array([[x[1,0]], [accels[0,0]], [x[3,0]], [accels[1,0]]])
+            analysis.add([x[0,0], x[1,0], x[2,0], x[3,0], t])
+            x += x_dot * dt
+
+
+        return analysis
+
+    def run_nonlinear_balancing(self, runtime, dt):
+        self._setup_controller()
+        x0=np.array([[0.0],[0.0],[np.deg2rad(10)],[0.2]])
+        data = self._run_nonlinear_simulation(runtime,dt,x0)
+        data.plot_results("Nonlinear Balancing Simulation Results")
         
     def run_regular_balancing(self, runtime, dt):
         self._setup_controller()
-        x0=np.array([[0.0],[0.0],[np.deg2rad(10)],[0.2]])
+        x0=np.array([[0.0],[0.0],[np.deg2rad(5)],[0.2]])
         data = self._run_simulation(runtime,dt,x0)
         data.plot_results("Regular Balancing Simulation Results")
 
@@ -170,150 +258,3 @@ class Simulation:
     # disturbance force (d). C is what we can measure from the system. 
     # D I still dont underestand well. 
     # determinant is basically tells us how much ....
-
-
-
-
-
-    ######OLD INEFFICIENT CODE. KEEP FOR REFERENCE######
-
-    # def run_regular_balancing(self, runtime, dt):
-    #     #create A,B,E matrices based on robot params
-    #     self._set_state_space_matrices()
-    #     #check if system is controllable and observable
-    #     check = self._is_controllable_observable()
-    #     #only do LQR if system is controllable and observable
-    #     if check:
-    #         self._create_LQR_controller()
-    #     else:
-    #         print("System is not controllable and/or observable. Cannot create LQR controller.")
-    #         return
-        
-    #     #init analysis object
-    #     analysis = Analysis()
-    #     self.last_sensed_theta = 0.0  # Reset sensor noise filter state
-
-    #     #initial state of robot is stationary but tilting slightly
-    #     x_regular = np.array([[0.0],[0.0],[np.deg2rad(10)],[0.2]])  # initial state: small angle deviation
-    #     u_actual = np.array([[0.0]])  # initial actual input. no motor input at this time
-
-    #     for t in np.arange(0, runtime, dt):
-    #         d = np.zeros((self.E.shape[1],1))  # no disturbance for regular balancing
-    #         x_sensed = self._add_sensor_noise(x_regular) # sensor noise added to system state as MPU6050 is known to be noisy
-            
-    #         u_cmd = -self.K @ x_sensed  # LQR control input with sensor noise incorporated
-    #         u_cmd = np.clip(u_cmd, -self.u_max, self.u_max)  # enforce input limits based on motor specs
-
-    #         u_actual += (u_cmd - u_actual) * dt/self.tau  # first order lag for motor response
-
-    #         x_dot = self.A @ x_regular + self.B @ u_actual + self.E @ d # simulate system dynamics, physics + actual inputs + disturbances(0)
-
-    #         analysis.add([x_regular[0,0], x_regular[1,0], x_regular[2,0], x_regular[3,0], t]) #add to analysis object for plotting later
-
-    #         x_regular += x_dot * dt #euler integration step to move simulation forward in time
-
-    #     print("Final state after regular balancing simulation:", x_regular.flatten())
-    #     analysis.plot_results("Regular Balancing Simulation Results") #plot results
-
-    # def run_poke_force_simulation(self, runtime, dt):
-    #     self._set_state_space_matrices()
-    #     check = self._is_controllable_observable()
-    #     if check:
-    #         self._create_LQR_controller()
-    #     else:
-    #         print("System is not controllable and/or observable. Cannot create LQR controller.")
-    #         return
-        
-    #     #init analysis object
-    #     analysis = Analysis()
-
-    #     self.last_sensed_theta = 0.0  # Reset sensor noise filter state
-
-    #     #simulate poke force input
-    #     x_poke = np.array([[0.0],[0.0],[0],[0]])  # initial state: upright
-    #     u_actual = np.array([[0.0]])  # initial actual input
-
-    #     for t in np.arange(0, runtime, dt):
-    #         x_sensed = self._add_sensor_noise(x_poke)
-    #         #simulate system dynamics here
-    #         if 5 <= t < 5.1:
-    #             d = np.array([[10.0]])  # apply a poke force disturbance for 0.1s
-    #         else:
-    #             d = np.zeros((self.E.shape[1],1))  # no disturbance otherwise
-            
-    #         u_cmd = -self.K @ x_sensed  # LQR control input
-    #         u_cmd = np.clip(u_cmd, -self.u_max, self.u_max)  # enforce input limits
-
-    #         u_actual += (u_cmd - u_actual) * dt/self.tau  # first order lag for motor response
-
-    #         x_dot = self.A @ x_poke + self.B @ u_actual + self.E @ d
-
-    #         analysis.add([x_poke[0,0], x_poke[1,0], x_poke[2,0], x_poke[3,0], t])
-
-    #         x_poke += x_dot * dt
-        
-    #     print("Final state after poke force simulation:", x_poke.flatten())
-    #     analysis.plot_results("Poke Force Simulation Results")
-
-    # def run_object_balancing_simulation(self, runtime, dt, extra_mass=[0.5, 8.0], plot_combined=True):
-    #     self._set_state_space_matrices()
-    #     check = self._is_controllable_observable()
-    #     if check:
-    #         self._create_LQR_controller() 
-    #     else:
-    #         print("System is not controllable and/or observable. Cannot create LQR controller.")
-    #         return
-    #     original_mb = self.RobotParams.mb
-
-    #     # --- REALISM PARAMETERS ---
-    #     mu = 0.7              # Friction coefficient (Rubber on Tile)
-    #     self.last_sensed_theta = 0.0  # Reset sensor noise filter state
-        
-    #     all_run_data = []
-
-    #     for mass in np.arange(extra_mass[0], extra_mass[1]+0.1, 1.0):
-    #         self.RobotParams.mb = original_mb + mass
-    #         self.RobotParams.ib = (1/3) * self.RobotParams.mb * self.RobotParams.l**2                
-    #         self._set_state_space_matrices()
-
-    #         # Friction limit for this specific payload
-    #         total_mass = self.RobotParams.mb + self.RobotParams.mw
-    #         f_max = mu * total_mass * self.RobotParams.g
-
-    #         analysis = Analysis()
-    #         x_object = np.array([[0.0],[0.0],[np.deg2rad(10)],[0.2]])
-    #         u_actual = np.array([[0.0]])
-            
-
-    #         for t in np.arange(0, runtime, dt):
-                
-    #             # 2. ADD SENSOR NOISE
-    #             x_sensed = self._add_sensor_noise(x_object)
-
-    #             # 3. COMPUTE CONTROL
-    #             u_cmd = -self.K @ x_sensed
-    #             u_cmd = np.clip(u_cmd, -self.u_max, self.u_max)
-                
-    #             # Motor lag
-    #             u_actual += (u_cmd - u_actual) * dt/self.tau
-
-    #             # 4. ADD FRICTION (TRACTION) LIMIT
-    #             # If required force > traction, wheels slip (force is capped)
-    #             # applied_force = u_cmd / self.RobotParams.rw
-    #             # if abs(applied_force) > f_max:
-    #             #     u_phys = np.sign(u_cmd) * (f_max * self.RobotParams.rw)
-    #             # else:
-    #             #     u_phys = u_cmd
-
-    #             # 5. PHYSICS STEP
-    #             x_dot = self.A @ x_object + self.B @ u_actual
-    #             x_object += x_dot * dt
-                
-    #             analysis.add([x_object[0,0], x_object[1,0], x_object[2,0], x_object[3,0], t])
-
-    #         label = f"+{mass:.1f}kg"
-    #         all_run_data.append((label, analysis.get_data()))
-    #         self.RobotParams.mb = original_mb # Reset for next loop
-        
-    #     if plot_combined:
-    #         Analysis.plot_multiple_runs(all_run_data, "Object Balancing: All Mass Variations")

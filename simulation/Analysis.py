@@ -23,8 +23,23 @@ class Analysis:
             'x': np.array(self.x),
             'xdot': np.array(self.xdot),
             'theta': np.array(self.theta),
-            'thetadot': np.array(self.thetadot)
+            'thetadot': np.array(self.thetadot),
         }
+    
+    def calculate_trise(self):
+        #Calculate rise time of velocity response to gauge whether controller is realistic 
+        xdot_array = np.array(self.xdot)
+        time_array = np.array(self.time)
+        max = np.max(xdot_array)
+        threshold_10 = 0.1 * max
+        threshold_90 = 0.9 * max
+        try:
+            t_10_index = np.where(xdot_array >= threshold_10)[0][0]
+            t_90_index = np.where(xdot_array >= threshold_90)[0][0]
+            t_rise = time_array[t_90_index] - time_array[t_10_index]
+            return t_rise
+        except IndexError:
+            return None  # Rise time could not be determined
 
     def plot_results(self, title):
         """Plot results for a single simulation run"""
@@ -39,7 +54,8 @@ class Analysis:
 
         plt.subplot(2, 2, 2)
         plt.plot(self.time, self.xdot)
-        plt.title('Velocity (xdot) vs Time')
+        print(self.calculate_trise())
+        plt.title(f'Velocity (xdot) vs Time Trise={self.calculate_trise():.2f}s')
         plt.xlabel('Time (s)')
         plt.ylabel('Velocity (m/s)')
 
@@ -58,8 +74,7 @@ class Analysis:
         plt.tight_layout()
         plt.show()
 
-    @staticmethod
-    def plot_multiple_runs(run_data_list, title):
+    def plot_multiple_runs(self, run_data_list, title):
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         fig.suptitle(title, fontsize=16)
 
