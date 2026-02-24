@@ -97,9 +97,11 @@ I want to make sure that the responses shown by these models are realistic. My w
 
 I think I've gotten this to a good point where the controls can be confirmed that it is possible to control this thing. I now need to set up how the software is going to look. 
 
-# Software Design
+# Software 
 
-This section is how I want the software of the system to be written. This is keeping in mind that I will be interfacing with 2 DC motors and an IMU 6050 via an arduino and in the future will need to add in the vision system so the robot can follow me. 
+At this point I think it's fair to start coding everything up. My goal is to try and get the code working with the hardware to the point where I just need to CAD the chassis, assemble it, and update the controller as applicable. The basic functionality such as tilting the MPU6050 causing the motors to spin should be good to go. 
+
+Along the way, I want to learn a bit more about motors, how they work and how to test them. Luckily (sort of) the motors I bought were on the cheaper end and did not have a ton of data with it. I will try to learn more about them by gathering this data and then updating my simulation to see if it makes any difference. 
 
 
 
