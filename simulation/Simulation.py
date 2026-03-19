@@ -1,6 +1,10 @@
+from operator import lt
+from time import time
 import control as ct
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import signal
+from torch import threshold
 
 from Analysis import Analysis
 
@@ -88,7 +92,7 @@ class Simulation:
         self._create_LQR_controller()
         self.last_sensed_theta = 0.0  # Reset sensor noise filter state
 
-    def _run_simulation(self, runtime, dt, x0, disturbance_fn=None):
+    def _run_simulation(self, runtime, dt, x0, disturbance_fn=None, plot = False):
         analysis = Analysis()
         x = x0.copy()
         u_actual = np.array([[0.0]])
@@ -114,13 +118,15 @@ class Simulation:
             analysis.add([x[0,0], x[1,0], x[2,0], x[3,0], t])
 
             x += x_dot * dt
+        
+        if plot:
 
-        plt.plot(time, np.array(ucmd), label='Commanded Input')
-        plt.plot(time, np.array(uactual), label='Actual Input', linestyle='--')
-        plt.title('Commanded vs Actual Input Torque')
-        plt.xlabel('Time (s)')
-        plt.ylabel('Input Torque (Nm)')
-        plt.legend()
+            plt.plot(time, np.array(ucmd), label='Commanded Input')
+            plt.plot(time, np.array(uactual), label='Actual Input', linestyle='--')
+            plt.title('Commanded vs Actual Input Torque')
+            plt.xlabel('Time (s)')
+            plt.ylabel('Input Torque (Nm)')
+            plt.legend()
 
         return analysis
 
@@ -240,21 +246,228 @@ class Simulation:
         if plot_combined:
             analysis.plot_multiple_runs(all_run_data, "Object Balancing: All Mass Variations")
 
+def settling_time(time, signal, threshold_deg=2.0):
+    """
+    Return the last timestamp at which |signal| exceeded threshold_deg.
+    This is how long the robot took to truly settle.
+    Returns 0.0 if the signal never left the threshold band (already settled).
+    """
+    threshold = np.deg2rad(threshold_deg)
+    exceeded = np.where(np.abs(signal) > threshold)[0]
+    if len(exceeded) == 0:
+        return 0.0
+    return time[exceeded[-1]]
+
+
+def evaluate(genome, robot_params, tau):
+    """
+    Score one genome (a set of Q and R values).
+
+    The genome is 5 floats in log10 space:
+        [log(q1), log(q2), log(q3), log(q4), log(r1)]
+
+    We decode to real values, build Q and R, run two simulation
+    scenarios, and return a scalar score. Higher is better.
+    A score of -1e9 means the robot fell over — discard.
+
+    Scenarios:
+        1. Poke: robot starts upright, hit with 10N at t=5s
+        2. Tilt: robot starts tilted 10 degrees with some angular velocity
+    """
+    # Decode log-space genome back to real Q/R values
+    # e.g. genome value 2.0  → 10^2.0 = 100
+    #      genome value -1.0 → 10^-1.0 = 0.1
+    q1, q2, q3, q4, r1 = [10 ** v for v in genome]
+
+    Q = np.diag([q1, q2, q3, q4])
+    R = np.array([[r1]])
+
+    try:
+        sim = Simulation(robot_params, Q, R, tau)
+        sim._setup_controller()
+
+        # --- Scenario 1: poke disturbance ---
+        def poke(t):
+            return np.array([[10.0]]) if 5 <= t < 5.1 else np.zeros((1, 1))
+
+        poke_data = sim._run_simulation(
+            runtime=10, dt=0.01,
+            x0=np.array([[0.], [0.], [0.], [0.]]),
+            disturbance_fn=poke,
+            plot=False           # no matplotlib windows during GA
+        ).get_data()
+
+        # --- Scenario 2: initial tilt (simulates object placed on top) ---
+        tilt_data = sim._run_simulation(
+            runtime=10, dt=0.01,
+            x0=np.array([[0.], [0.], [np.deg2rad(10)], [0.2]]),
+            plot=False
+        ).get_data()
+
+    except Exception:
+        # LQR failed to solve, or system went unstable — worst score
+        return -1e9
+
+    theta_poke = poke_data['theta']
+    theta_tilt = tilt_data['theta']
+    time_arr   = poke_data['time']
+
+    # --- Hard failure check: fell over (>45 degrees) ---
+    if np.max(np.abs(theta_poke)) > np.deg2rad(45):
+        return -1e9
+    if np.max(np.abs(theta_tilt)) > np.deg2rad(45):
+        return -1e9
+
+    # --- Metrics ---
+    # 1. Settling time: how long until theta stays within 2 degrees
+    poke_settle = settling_time(time_arr, theta_poke)
+    tilt_settle = settling_time(tilt_data['time'], theta_tilt)
+
+    # 2. Overshoot: peak angle deviation
+    poke_overshoot = np.max(np.abs(theta_poke))
+    tilt_overshoot = np.max(np.abs(theta_tilt))
+
+    # 3. Control effort: penalise rapid velocity changes (proxy for motor thrashing)
+    poke_effort = np.sum(np.abs(np.diff(poke_data['xdot'])))
+    tilt_effort = np.sum(np.abs(np.diff(tilt_data['xdot'])))
+
+    # --- Combined score (negative because we maximise, but want small values) ---
+    # Weights: tweak these to change what "good" means to you.
+    #   3.0  → settling speed is important
+    #   5.0  → overshoot is most important (don't swing wildly)
+    #   0.1  → effort matters a little (don't thrash motors)
+    score = -(
+        3.0 * (poke_settle   + tilt_settle)    +
+        5.0 * (poke_overshoot + tilt_overshoot) +
+        0.1 * (poke_effort   + tilt_effort)
+    )
+
+    return score
+
+
+def run_ga(robot_params, tau, generations=50, pop_size=40, seed=None):
+    """
+    Run the genetic algorithm to find optimal Q and R matrices.
+
+    Args:
+        robot_params:  Your RobotParams object.
+        tau:           Motor time constant.
+        generations:   How many generations to evolve (50 is a good start).
+        pop_size:      How many individuals per generation (40 is a good start).
+        seed:          Optional random seed for reproducibility.
+
+    Returns:
+        best_Q, best_R, best_score
+
+    Example usage:
+        best_Q, best_R, score = run_ga(robot_params, tau=0.1)
+        sim = Simulation(robot_params, best_Q, best_R, tau=0.1)
+        sim.run_poke_force_simulation(runtime=10, dt=0.01)
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    genome_size = 5  # [log(q1), log(q2), log(q3), log(q4), log(r1)]
+
+    # Search space: each value is in log10 space.
+    # [-3, 3] means actual Q/R values range from 0.001 to 1000.
+    # State vector: [x, x_dot, theta, theta_dot]
+    # Sensible starting intuition:
+    #   q1 (position)        — low weight, we don't mind drifting a bit
+    #   q2 (velocity)        — medium weight
+    #   q3 (angle)           — HIGH weight, this is the critical state
+    #   q4 (angular vel)     — medium-high weight
+    #   r1 (control effort)  — low weight, motors are strong enough
+    bounds = np.array([
+        [-3.0, 3.0],   # log(q1): position
+        [-3.0, 3.0],   # log(q2): velocity
+        [-1.0, 4.0],   # log(q3): angle — biased toward higher values
+        [-2.0, 3.0],   # log(q4): angular velocity
+        [-3.0, 1.0],   # log(r1): control cost — biased toward lower values
+    ])
+
+    # --- Initial population: random within bounds ---
+    population = np.random.uniform(
+        bounds[:, 0], bounds[:, 1],
+        size=(pop_size, genome_size)
+    )
+
+    best_genome = None
+    best_score  = -np.inf
+
+    print(f"Starting GA: {generations} generations × {pop_size} individuals "
+        f"= {generations * pop_size} total evaluations")
+    print("-" * 55)
+
+    for gen in range(generations):
+        # --- Evaluate every individual in this generation ---
+        scores = [evaluate(g, robot_params, tau) for g in population]
+
+        # --- Track the best genome seen so far ---
+        gen_best_idx = int(np.argmax(scores))
+        if scores[gen_best_idx] > best_score:
+            best_score  = scores[gen_best_idx]
+            best_genome = population[gen_best_idx].copy()
+
+        # --- Print progress every 5 generations ---
+        if gen % 5 == 0 or gen == generations - 1:
+            q_vals = [round(10 ** v, 4) for v in best_genome[:4]]
+            r_val  = round(10 ** best_genome[4], 4)
+            print(f"Gen {gen:3d} | best score: {best_score:8.4f} | "
+                f"Q=diag({q_vals}) R=[[{r_val}]]")
+
+        # --- Selection: keep top 50% as parents ---
+        sorted_idx = np.argsort(scores)[::-1]
+        parents    = population[sorted_idx[:pop_size // 2]]
+
+        # --- Breed next generation via crossover + mutation ---
+        children = []
+        while len(children) < pop_size:
+            # Pick two distinct parents at random
+            idx = np.random.choice(len(parents), size=2, replace=False)
+            a, b = parents[idx[0]], parents[idx[1]]
+
+            # Crossover: each gene comes from either parent with 50/50 chance
+            mask  = np.random.rand(genome_size) > 0.5
+            child = np.where(mask, a, b)
+
+            # Mutation: add small gaussian noise to each gene
+            # std=0.15 in log space means roughly ±40% change in real value
+            child += np.random.normal(0, 0.15, genome_size)
+
+            # Clamp back into the allowed search space
+            child = np.clip(child, bounds[:, 0], bounds[:, 1])
+            children.append(child)
+
+        population = np.array(children)
+
+    # --- Decode and return the winner ---
+    q1, q2, q3, q4, r1 = [10 ** v for v in best_genome]
+    best_Q = np.diag([q1, q2, q3, q4])
+    best_R = np.array([[r1]])
+
+    print("\n" + "=" * 55)
+    print("GA complete.")
+    print(f"Best Q: diag({[round(v, 4) for v in [q1, q2, q3, q4]]})")
+    print(f"Best R: [[{r1:.4f}]]")
+    print(f"Best score: {best_score:.4f}")
+    print("=" * 55)
+
+    return best_Q, best_R, best_score
 
 
 
-
-    #intuitions
-    # so the way im understanding these matrices is 
-    # A describes the physics of the system itself. What 
-    # forces are acting on the robot at all times and how 
-    # they relate to the states. So it's like how gravity '
-    # 'impacts velocity and angular velocity. The B matrix is how '
-    # 'the robot responds to any input like motor torque, but more '
-    # 'specifically it's how each state is impacted by an input 
-    # force from the motor. So the velocity is in the positive 
-    # direction and the angular velocity is in the other direction. 
-    # Same for the E matrix which is how each state reacts to a 
-    # disturbance force (d). C is what we can measure from the system. 
-    # D I still dont underestand well. 
-    # determinant is basically tells us how much ....
+#intuitions
+# so the way im understanding these matrices is 
+# A describes the physics of the system itself. What 
+# forces are acting on the robot at all times and how 
+# they relate to the states. So it's like how gravity '
+# 'impacts velocity and angular velocity. The B matrix is how '
+# 'the robot responds to any input like motor torque, but more '
+# 'specifically it's how each state is impacted by an input 
+# force from the motor. So the velocity is in the positive 
+# direction and the angular velocity is in the other direction. 
+# Same for the E matrix which is how each state reacts to a 
+# disturbance force (d). C is what we can measure from the system. 
+# D I still dont underestand well. 
+# determinant is basically tells us how much ....
